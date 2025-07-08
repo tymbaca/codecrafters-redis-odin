@@ -74,17 +74,17 @@ read_bulk_string :: proc(s: io.Stream) -> (str: string, err: Error) {
         return "", .Invalid_Length
     }
 
-    body := make([dynamic]byte, 0, length)
+    body := make([dynamic]byte, length)
 
     // read the body
-    _ = io.read_at_least(s, body[:], length) or_return
+    _ = io.read_full(s, body[:]) or_return
 
     // read crlf
     cr := io.read_byte(s) or_return
     lf := io.read_byte(s) or_return
 
     if !(cr == '\r' && lf == '\n') {
-        return "", .Invalid_Length
+        return "", .Invalid_Body
     }
 
     return string(body[:]), nil
@@ -93,16 +93,17 @@ read_bulk_string :: proc(s: io.Stream) -> (str: string, err: Error) {
 @(test)
 read_bulk_string_test :: proc(t: ^testing.T) {
     s := string_to_stream("5\r\nhello\r\n")
+    defer free_all()
 
     res, err := read_bulk_string(s)
     testing.expect_value(t, err, nil)
     testing.expect_value(t, res, "hello")
 }
 
-string_to_stream :: proc(str: string) -> io.Stream {
-    b: bytes.Buffer
-    bytes.buffer_init_string(&b, str)
-    return bytes.buffer_to_stream(&b)
+string_to_stream :: #force_inline proc(str: string, allocator := context.allocator) -> io.Stream {
+    b := new(bytes.Buffer, allocator = allocator)
+    bytes.buffer_init_string(b, str)
+    return bytes.buffer_to_stream(b)
 }
 
 Error :: union {
@@ -113,7 +114,7 @@ Error :: union {
 Encoding_Error :: enum {
     None = 0,
     Invalid_Length,
-    Body_Short,
+    Invalid_Body,
 }
 
 stream_from_tcp_socket :: proc(s: net.TCP_Socket) -> io.Stream {
