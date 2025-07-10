@@ -13,6 +13,7 @@ Encoding_Error :: enum {
     Invalid_Integer,
     Invalid_Bulk_String,
     Invalid_Array,
+    Unexpecteed_Array_Type,
 }
 
 Unsupported_First_Byte :: struct {

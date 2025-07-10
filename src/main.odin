@@ -11,6 +11,7 @@ import "core:bytes"
 import "core:fmt"
 import "core:net"
 import "core:strings"
+import "enc"
 
 main :: proc() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -35,8 +36,18 @@ main :: proc() {
     handle(s)
 }
 
-handle :: proc(w: io.Writer) {
+handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
+    strs := enc.read_array_of_bulk_strings(s, allocator) or_return
 
+    if len(strs) == 1 && strs[0] == "PING" {
+        _ = io.write_string(s, "+PONG\r\n") or_return
+    }
+
+    return nil
+}
+
+Error :: union {
+    enc.Error,
 }
 
 stream_from_tcp_socket :: proc(s: net.TCP_Socket) -> io.Stream {
