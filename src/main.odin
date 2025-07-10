@@ -1,5 +1,6 @@
 package main
 
+import "core:log"
 import "core:testing"
 import "core:strconv"
 import "core:unicode"
@@ -34,87 +35,8 @@ main :: proc() {
     handle(s)
 }
 
-handle :: proc(s: io.Stream) {
+handle :: proc(w: io.Writer) {
 
-}
-
-read_bulk_string :: proc(s: io.Stream) -> (str: string, err: Error) {
-    defer free_all(context.temp_allocator)
-    // format: <length>\r\n<data>\r\n
-
-    length_digits := make([dynamic]byte, context.temp_allocator)
-
-    fmt.println(1)
-
-    for {
-        fmt.println(2)
-        b := io.read_byte(s) or_return
-
-        fmt.println(3)
-        if !unicode.is_digit(rune(b)) {
-            second_b := io.read_byte(s) or_return
-            fmt.println(4)
-
-            if b == '\r' && second_b == '\n' {
-                break
-            } else {
-                return "", .Invalid_Length
-            }
-        }
-
-        append(&length_digits, b)
-    }
-
-    if len(length_digits) == 0 {
-        return "", .Invalid_Length
-    }
-
-    length, length_ok := strconv.parse_int(string(length_digits[:]))
-    if !length_ok {
-        return "", .Invalid_Length
-    }
-
-    body := make([dynamic]byte, length)
-
-    // read the body
-    _ = io.read_full(s, body[:]) or_return
-
-    // read crlf
-    cr := io.read_byte(s) or_return
-    lf := io.read_byte(s) or_return
-
-    if !(cr == '\r' && lf == '\n') {
-        return "", .Invalid_Body
-    }
-
-    return string(body[:]), nil
-}
-
-@(test)
-read_bulk_string_test :: proc(t: ^testing.T) {
-    s := string_to_stream("5\r\nhello\r\n")
-    defer free_all()
-
-    res, err := read_bulk_string(s)
-    testing.expect_value(t, err, nil)
-    testing.expect_value(t, res, "hello")
-}
-
-string_to_stream :: #force_inline proc(str: string, allocator := context.allocator) -> io.Stream {
-    b := new(bytes.Buffer, allocator = allocator)
-    bytes.buffer_init_string(b, str)
-    return bytes.buffer_to_stream(b)
-}
-
-Error :: union {
-    io.Error,
-    Encoding_Error,
-}
-
-Encoding_Error :: enum {
-    None = 0,
-    Invalid_Length,
-    Invalid_Body,
 }
 
 stream_from_tcp_socket :: proc(s: net.TCP_Socket) -> io.Stream {
