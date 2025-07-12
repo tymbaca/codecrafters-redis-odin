@@ -22,7 +22,7 @@ read_array_of_bulk_strings :: proc(r: io.Reader, allocator := context.allocator)
         }
         
         if type != .Bulk_String {
-            return nil, .Unexpecteed_Array_Type
+            return nil, .Unexpected_Array_Type
         }
 
         res[i] = read_bulk_string(r, allocator) or_return
@@ -40,6 +40,8 @@ write_array_of_bulk_strings :: proc(w: io.Writer, arr: []string) -> (err: Error)
 
     return nil
 }
+
+
 
 _type_to_typeid :: proc($type: Type) -> typeid {
     #partial switch type {

@@ -6,6 +6,7 @@ Error :: union {
     io.Error,
     Encoding_Error,
     Unsupported_First_Byte,
+    Unexpected_First_Byte,
 }
 
 Encoding_Error :: enum {
@@ -13,9 +14,13 @@ Encoding_Error :: enum {
     Invalid_Integer,
     Invalid_Bulk_String,
     Invalid_Array,
-    Unexpecteed_Array_Type,
+    Unexpected_Array_Type,
 }
 
 Unsupported_First_Byte :: struct {
+    first_byte: byte,
+}
+
+Unexpected_First_Byte :: struct {
     first_byte: byte,
 }

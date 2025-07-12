@@ -1,5 +1,6 @@
 package main
 
+import "core:time"
 import "core:log"
 import "core:testing"
 import "core:strconv"
@@ -14,8 +15,11 @@ import "core:strings"
 import "enc"
 
 main :: proc() {
+    context.logger = log.create_console_logger()
+
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.eprintln("Logs from your program will appear here!")
+    log.info("Logs from your program will appear here!")
 
 	// Uncomment this block to pass the first stage
 	listen_sock, listen_err := net.listen_tcp(net.Endpoint{
@@ -26,17 +30,30 @@ main :: proc() {
         fmt.panicf("%s", listen_err)
     }
     
-    client_sock, client_endpoint, client_err := net.accept_tcp(listen_sock)
-    if client_err != nil {
-        fmt.panicf("%s", client_err)
-    }
-    s := stream_from_tcp_socket(client_sock)
-    defer io.close(s)
+    for {
+        client_sock, client_endpoint, client_err := net.accept_tcp(listen_sock)
+        if client_err != nil {
+            fmt.panicf("%s", client_err)
+        }
 
-    handle(s)
+        log.info("got connection from", client_endpoint)
+        s := stream_from_tcp_socket(client_sock)
+        defer io.close(s)
+
+        handle_err := handle(s)
+        if handle_err != nil {
+            log.panic(handle_err)
+        }
+    }
+
+    log.info("exiting")
 }
 
 handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
+    fb := io.read_byte(s) or_return
+    if type, ok := enc.get_type(fb); !ok || type != .Array {
+        return enc.Error(enc.Unexpected_First_Byte{first_byte = fb})
+    }
     strs := enc.read_array_of_bulk_strings(s, allocator) or_return
 
     if len(strs) == 1 && strs[0] == "PING" {
@@ -47,6 +64,7 @@ handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
 }
 
 Error :: union {
+    io.Error,
     enc.Error,
 }
 
