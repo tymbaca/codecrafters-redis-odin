@@ -15,7 +15,7 @@ import "core:strings"
 import "enc"
 
 main :: proc() {
-    context.logger = log.create_console_logger()
+    context.logger = log.create_console_logger(opt = log.Options{.Level, .Time})
 
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.eprintln("Logs from your program will appear here!")
@@ -50,21 +50,49 @@ main :: proc() {
 }
 
 handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
-    fb := io.read_byte(s) or_return
-    if type, ok := enc.get_type(fb); !ok || type != .Array {
-        return enc.Error(enc.Unexpected_First_Byte{first_byte = fb})
-    }
-    strs := enc.read_array_of_bulk_strings(s, allocator) or_return
+    defer free_all()
 
-    if len(strs) == 1 && strs[0] == "PING" {
-        _ = io.write_string(s, "+PONG\r\n") or_return
+    for cmd, err in read_request_iter(s, allocator) {
+        if err != nil {
+            return err
+        }
+
+        log.info("got command", cmd)
+        
+        if cmd == "PING" {
+            _ = io.write_string(s, "+PONG\r\n") or_return
+        }
     }
 
     return nil
 }
 
+read_request_iter :: proc(r: io.Reader, allocator := context.allocator) -> (cmd: string, err: Error, next: bool) {
+    cmd, err = read_request(r, allocator)
+    if err == .EOF {
+        return "", err, false
+    }
+    if err != nil {
+        return "", err, true
+    }
+
+    return cmd, nil, true
+}
+
+read_request :: proc(r: io.Reader, allocator := context.allocator) -> (cmd: string, err: Error) {
+    fb := io.read_byte(r) or_return
+    if type, ok := enc.get_type(fb); !ok || type != .Array {
+        return "", enc.Error(enc.Unexpected_First_Byte{first_byte = fb})
+    }
+
+    strs := enc.read_array_of_bulk_strings(r, allocator) or_return
+
+    assert(len(strs) > 0)
+
+    return strs[0], nil
+}
+
 Error :: union {
-    io.Error,
     enc.Error,
 }
 
@@ -80,16 +108,36 @@ tcp_socket_stream_proc :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []b
     
     switch mode {
     case .Read:
+        if len(p) == 0 {
+            return 0, nil
+        }
+
         n_int, recv_err := net.recv_tcp(sock, p)
+        if n_int == 0 && recv_err == nil {
+            return 0, .EOF
+        }
+
         return i64(n_int), tcp_recv_to_io_error(recv_err)
+
     case .Write:
+        if len(p) == 0 {
+            return 0, nil
+        }
+
         n_int, send_err := net.send_tcp(sock, p)
+        if n_int == 0 && send_err == nil {
+            return 0, .EOF
+        }
+
         return i64(n_int), tcp_send_to_io_error(send_err)
+
     case .Close:
         net.close(sock)
         return 0, .None
+
     case .Query:
 		return io.query_utility({.Read, .Write, .Close, .Query})
+
     case .Flush, .Read_At, .Write_At, .Destroy, .Size, .Seek:
         // no need to implement
     }
