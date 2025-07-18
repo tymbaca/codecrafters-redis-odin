@@ -1,5 +1,8 @@
 package main
 
+import "core:mem/virtual"
+import "core:mem"
+import "core:thread"
 import "core:time"
 import "core:log"
 import "core:testing"
@@ -18,10 +21,13 @@ main :: proc() {
     context.logger = log.create_console_logger(opt = log.Options{.Level, .Time})
 
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.eprintln("Logs from your program will appear here!")
     log.info("Logs from your program will appear here!")
 
-	// Uncomment this block to pass the first stage
+    run()
+}
+
+
+run :: proc() {
 	listen_sock, listen_err := net.listen_tcp(net.Endpoint{
         address = net.IP4_Loopback, 
         port = 6379,
@@ -29,6 +35,13 @@ main :: proc() {
     if listen_err != nil {
         fmt.panicf("%s", listen_err)
     }
+
+    mutex_allocator: mem.Mutex_Allocator
+    mem.mutex_allocator_init(&mutex_allocator, context.allocator)
+    context.allocator = mem.mutex_allocator(&mutex_allocator)
+
+    pool: thread.Pool
+    thread.pool_init(&pool, context.allocator, 24)
     
     for {
         client_sock, client_endpoint, client_err := net.accept_tcp(listen_sock)
@@ -38,7 +51,6 @@ main :: proc() {
 
         log.info("got connection from", client_endpoint)
         s := stream_from_tcp_socket(client_sock)
-        defer io.close(s)
 
         handle_err := handle(s)
         if handle_err != nil {
@@ -50,7 +62,12 @@ main :: proc() {
 }
 
 handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
-    defer free_all()
+    defer {
+        if c, ok := io.to_closer(s); ok {
+            io.close(c)
+        }
+        free_all()
+    }
 
     for cmd, err in read_request_iter(s, allocator) {
         if err != nil {
