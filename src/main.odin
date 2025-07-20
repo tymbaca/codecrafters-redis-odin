@@ -1,5 +1,8 @@
 package main
 
+import "core:sort"
+import "core:container/intrusive/list"
+import "base:runtime"
 import "core:mem/virtual"
 import "core:mem"
 import "core:thread"
@@ -15,7 +18,9 @@ import "core:bytes"
 import "core:fmt"
 import "core:net"
 import "core:strings"
-import "enc"
+import "src:enc"
+import nbio "src:nbio/poly"
+import nbio_core "src:nbio"
 
 main :: proc() {
     context.logger = log.create_console_logger(opt = log.Options{.Level, .Time})
@@ -26,23 +31,29 @@ main :: proc() {
     run()
 }
 
+Server :: struct {
+    io: ^nbio.IO,
+    listen_sock: net.TCP_Socket,
+}
+
 
 run :: proc() {
-	listen_sock, listen_err := net.listen_tcp(net.Endpoint{
+    io: nbio.IO
+    nbio.init(&io, context.allocator)   
+
+    listen_sock, listen_err := nbio.open_and_listen_tcp(&io, net.Endpoint{
         address = net.IP4_Loopback, 
         port = 6379,
     })
     if listen_err != nil {
-        fmt.panicf("%s", listen_err)
+        log.panic(listen_err)
     }
 
-    mutex_allocator: mem.Mutex_Allocator
-    mem.mutex_allocator_init(&mutex_allocator, context.allocator)
-    context.allocator = mem.mutex_allocator(&mutex_allocator)
+    server := Server{io = &io, listen_sock = listen_sock}
 
-    pool: thread.Pool
-    thread.pool_init(&pool, context.allocator, 24)
-    
+    nbio.accept(&io, listen_sock, &server, on_accept)
+
+
     for {
         client_sock, client_endpoint, client_err := net.accept_tcp(listen_sock)
         if client_err != nil {
@@ -59,6 +70,33 @@ run :: proc() {
     }
 
     log.info("exiting")
+}
+
+on_accept :: proc(server: ^Server, client: net.TCP_Socket, source: net.Endpoint, err: net.Network_Error) {
+    io := server.io
+    if err != nil {
+        #partial switch e in err {
+        case net.Accept_Error:
+            #partial switch e {
+            case .Insufficient_Resources:
+                log.warnf("insufficient resources to accept new connection, will retry in a second")
+                nbio.timeout(io, time.Second, server, proc(server: ^Server) {
+                    nbio.accept(server.io, server.listen_sock, server, on_accept)
+                })
+                return
+            case:   
+                log.errorf("accept error (source: %v): %v", source, e)
+                return
+            }
+        case:
+            log.panicf("non-accept error when accepting (source: %v): %v", source, err)
+        }
+    }
+
+    // queue accept next connection
+    nbio.accept(io, server.listen_sock, server, on_accept)
+
+    nbio_core.test_client_and_server_send_recv()
 }
 
 handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
