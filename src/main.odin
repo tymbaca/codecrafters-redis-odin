@@ -120,7 +120,9 @@ handle :: proc(server: ^Server, client: ^Client, allocator := context.allocator)
         case "SET":
             assert(len(args) == 2)
             key, val := args[0], args[1] 
+
             storage.set(&server.storage, key, val)
+            enc.write_simple_string(s, "OK", include_fb = true) or_return
 
         case "GET":
             assert(len(args) == 1)

@@ -26,7 +26,6 @@ read_bulk_string :: proc(r: io.Reader, allocator := context.allocator) -> (str: 
     return string(body), nil
 }
 
-// TODO: handle quotes
 write_bulk_string :: proc(w: io.Writer, str: string, include_fb := false) -> (err: Error) {
     if include_fb {
         io.write_byte(w, '$') or_return
