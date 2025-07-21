@@ -26,6 +26,7 @@ read_bulk_string :: proc(r: io.Reader, allocator := context.allocator) -> (str: 
     return string(body), nil
 }
 
+// TODO: handle quotes
 write_bulk_string :: proc(w: io.Writer, str: string) -> (err: Error) {
     write_int(w, len(str)) or_return
     _ = io.write_string(w, str) or_return

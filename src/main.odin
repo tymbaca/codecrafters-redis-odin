@@ -56,12 +56,11 @@ run :: proc() {
         conn_index += 1
 
         log.info("got connection from", client_endpoint)
-        s := stream_from_tcp_socket(client_sock)
 
         client := new(Client, thread_allocator)
         client.sock = client_sock
         client.endpoint = client_endpoint
-        client.stream = s
+        client.stream = stream_from_tcp_socket(client_sock)
 
         thread.pool_add_task(&client_thread_pool, thread_allocator, handle_task, client, user_index = conn_index)
     }
@@ -75,7 +74,7 @@ Client :: struct {
     stream: io.Stream, // wraps sock
 }
 
-handle_task :: proc(task: thread.Task) { // TODO: user arena?
+handle_task :: proc(task: thread.Task) {
     client := (^Client)(task.data)
     defer free(client, task.allocator)
 
@@ -83,29 +82,32 @@ handle_task :: proc(task: thread.Task) { // TODO: user arena?
     if err := virtual.arena_init_growing(&arena); err != nil { // NOTE: will it break if i get string bigger than arena block?
         log.panicf("can't create arena allocator for new connection: %v", err)
     }
-    arena_allocator := virtual.arena_allocator(&arena) 
+    arena_allocator := virtual.arena_allocator(&arena)
+    context.allocator = arena_allocator
 
-    handle(client, arena_allocator)
+    handle(client.stream, arena_allocator)
 }
 
-handle :: proc(client: ^Client, allocator := context.allocator) -> (err: Error) {
-    s := client.stream
-
+handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
     defer {
         if c, ok := io.to_closer(s); ok {
             io.close(c)
         }
-        free_all()
+        free_all(allocator)
     }
 
-    for cmd, err in read_request_iter(s, allocator) {
+    for cmd, args, err in read_request_iter(s, allocator) {
         if err != nil {
             return err
         }
 
         log.info("got command", cmd)
-        
-        if cmd == "PING" {
+
+        switch cmd {
+        case "ECHO":
+            assert(len(args) == 1)
+            enc.write_bulk_string(s, args[0])
+        case "PING":
             _ = io.write_string(s, "+PONG\r\n") or_return
         }
     }
@@ -113,29 +115,33 @@ handle :: proc(client: ^Client, allocator := context.allocator) -> (err: Error) 
     return nil
 }
 
-read_request_iter :: proc(r: io.Reader, allocator := context.allocator) -> (cmd: string, err: Error, next: bool) {
+read_request_iter :: proc(r: io.Reader, allocator := context.allocator) -> (cmd: string, args: []string, err: Error, next: bool) {
     cmd, err = read_request(r, allocator)
     if err == .EOF {
-        return "", err, false
+        return "", nil, err, false
     }
     if err != nil {
-        return "", err, true
+        return "", nil, err, true
     }
 
-    return cmd, nil, true
+    return cmd, nil, nil, true
 }
 
-read_request :: proc(r: io.Reader, allocator := context.allocator) -> (cmd: string, err: Error) {
+read_request :: proc(r: io.Reader, allocator := context.allocator) -> (cmd: string, args: []string, err: Error) {
     fb := io.read_byte(r) or_return
     if type, ok := enc.get_type(fb); !ok || type != .Array {
-        return "", enc.Error(enc.Unexpected_First_Byte{first_byte = fb})
+        return "", nil, enc.Error(enc.Unexpected_First_Byte{first_byte = fb})
     }
 
     strs := enc.read_array_of_bulk_strings(r, allocator) or_return
-
     assert(len(strs) > 0)
 
-    return strs[0], nil
+    cmd = strs[0]
+    if len(strs) > 1 {
+        args = strs[1:]
+    }
+
+    return cmd, args, nil
 }
 
 Error :: union {
