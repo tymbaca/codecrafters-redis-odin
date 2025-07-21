@@ -116,7 +116,7 @@ handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
 }
 
 read_request_iter :: proc(r: io.Reader, allocator := context.allocator) -> (cmd: string, args: []string, err: Error, next: bool) {
-    cmd, err = read_request(r, allocator)
+    cmd, args, err = read_request(r, allocator)
     if err == .EOF {
         return "", nil, err, false
     }
@@ -124,7 +124,7 @@ read_request_iter :: proc(r: io.Reader, allocator := context.allocator) -> (cmd:
         return "", nil, err, true
     }
 
-    return cmd, nil, nil, true
+    return cmd, args, nil, true
 }
 
 read_request :: proc(r: io.Reader, allocator := context.allocator) -> (cmd: string, args: []string, err: Error) {
