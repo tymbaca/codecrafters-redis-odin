@@ -20,6 +20,7 @@ import "core:fmt"
 import "core:net"
 import "core:strings"
 import "src:enc"
+import storage "storage"
 
 main :: proc() {
     context.logger = log.create_console_logger(opt = log.Options{.Level, .Time})
@@ -74,6 +75,10 @@ Client :: struct {
     stream: io.Stream, // wraps sock
 }
 
+Server :: struct {
+    storage: storage.Storage,
+}
+
 handle_task :: proc(task: thread.Task) {
     client := (^Client)(task.data)
     defer free(client, task.allocator)
@@ -88,7 +93,8 @@ handle_task :: proc(task: thread.Task) {
     handle(client.stream, arena_allocator)
 }
 
-handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
+handle :: proc(server: ^Server, client: ^Client, allocator := context.allocator) -> (err: Error) {
+    s := client.stream
     defer {
         if c, ok := io.to_closer(s); ok {
             io.close(c)
@@ -107,8 +113,23 @@ handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
         case "ECHO":
             assert(len(args) == 1)
             enc.write_bulk_string(s, args[0], include_fb = true)
+
         case "PING":
             _ = io.write_string(s, "+PONG\r\n") or_return
+
+        case "SET":
+            assert(len(args) == 2)
+            key, val := args[0], args[1] 
+            storage.set(&server.storage, key, val)
+
+        case "GET":
+            assert(len(args) == 1)
+            val, ok := storage.get(&server.storage, args[0])
+            if ok {
+                enc.write_bulk_string(s, args[0]) or_return
+            } else {
+                enc.write_null(s) or_return
+            }
         }
     }
 
