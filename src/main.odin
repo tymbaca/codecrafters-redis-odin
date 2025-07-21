@@ -45,6 +45,7 @@ run :: proc() {
 
     client_thread_pool: thread.Pool
     thread.pool_init(&client_thread_pool, thread_allocator, 1024)
+    thread.pool_start(&client_thread_pool)
 
     conn_index := 0
     for {
@@ -75,14 +76,16 @@ Client :: struct {
 }
 
 handle_task :: proc(task: thread.Task) { // TODO: user arena?
+    client := (^Client)(task.data)
+    defer free(client, task.allocator)
+
     arena: virtual.Arena
-    if err := virtual.arena_init_growing(&arena); err != nil {
+    if err := virtual.arena_init_growing(&arena); err != nil { // NOTE: will it break if i get string bigger than arena block?
         log.panicf("can't create arena allocator for new connection: %v", err)
     }
-    task_allocator := virtual.arena_allocator(&arena) 
+    arena_allocator := virtual.arena_allocator(&arena) 
 
-    client := (^Client)(task.data)
-    handle(client, context.allocator)
+    handle(client, arena_allocator)
 }
 
 handle :: proc(client: ^Client, allocator := context.allocator) -> (err: Error) {
