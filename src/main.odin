@@ -48,6 +48,12 @@ run :: proc() {
     thread.pool_init(&client_thread_pool, thread_allocator, 1024)
     thread.pool_start(&client_thread_pool)
 
+    main_storage: storage.Storage
+    storage.init(&main_storage, thread_allocator)
+    server := Server{
+        storage = main_storage,
+    }
+
     conn_index := 0
     for {
         client_sock, client_endpoint, client_err := net.accept_tcp(listen_sock)
@@ -58,12 +64,15 @@ run :: proc() {
 
         log.info("got connection from", client_endpoint)
 
-        client := new(Client, thread_allocator)
-        client.sock = client_sock
-        client.endpoint = client_endpoint
-        client.stream = stream_from_tcp_socket(client_sock)
+        ctx := new(New_Conn_Context, thread_allocator)
+        ctx.server = &server
+        ctx.client = Client{
+            sock = client_sock,
+            endpoint = client_endpoint,
+            stream = stream_from_tcp_socket(client_sock),
+        }
 
-        thread.pool_add_task(&client_thread_pool, thread_allocator, handle_task, client, user_index = conn_index)
+        thread.pool_add_task(&client_thread_pool, thread_allocator, handle_task, ctx, user_index = conn_index)
     }
 
     log.info("exiting")
@@ -79,9 +88,14 @@ Server :: struct {
     storage: storage.Storage,
 }
 
+New_Conn_Context :: struct {
+    server: ^Server,
+    client: Client,
+}
+
 handle_task :: proc(task: thread.Task) {
-    client := (^Client)(task.data)
-    defer free(client, task.allocator)
+    ctx := (^New_Conn_Context)(task.data)
+    defer free(ctx, task.allocator)
 
     arena: virtual.Arena
     if err := virtual.arena_init_growing(&arena); err != nil { // NOTE: will it break if i get string bigger than arena block?
@@ -90,11 +104,12 @@ handle_task :: proc(task: thread.Task) {
     arena_allocator := virtual.arena_allocator(&arena)
     context.allocator = arena_allocator
 
-    handle(client.stream, arena_allocator)
+    handle(ctx, arena_allocator)
 }
 
-handle :: proc(server: ^Server, client: ^Client, allocator := context.allocator) -> (err: Error) {
-    s := client.stream
+handle :: proc(ctx: ^New_Conn_Context, allocator := context.allocator) -> (err: Error) {
+    server := ctx.server
+    s := ctx.client.stream
     defer {
         if c, ok := io.to_closer(s); ok {
             io.close(c)
