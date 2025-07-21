@@ -143,7 +143,7 @@ handle :: proc(ctx: ^New_Conn_Context, allocator := context.allocator) -> (err: 
             assert(len(args) == 1)
             val, ok := storage.get(&server.storage, args[0])
             if ok {
-                enc.write_bulk_string(s, args[0], include_fb = true) or_return
+                enc.write_bulk_string(s, val, include_fb = true) or_return
             } else {
                 enc.write_null(s) or_return
             }
