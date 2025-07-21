@@ -1,5 +1,6 @@
 package main
 
+import "core:sync"
 import "core:sort"
 import "core:container/intrusive/list"
 import "base:runtime"
@@ -19,8 +20,6 @@ import "core:fmt"
 import "core:net"
 import "core:strings"
 import "src:enc"
-import nbio "src:nbio/poly"
-import nbio_core "src:nbio"
 
 main :: proc() {
     context.logger = log.create_console_logger(opt = log.Options{.Level, .Time})
@@ -31,17 +30,8 @@ main :: proc() {
     run()
 }
 
-Server :: struct {
-    io: ^nbio.IO,
-    listen_sock: net.TCP_Socket,
-}
-
-
 run :: proc() {
-    io: nbio.IO
-    nbio.init(&io, context.allocator)   
-
-    listen_sock, listen_err := nbio.open_and_listen_tcp(&io, net.Endpoint{
+    listen_sock, listen_err := net.listen_tcp(net.Endpoint{
         address = net.IP4_Loopback, 
         port = 6379,
     })
@@ -49,57 +39,55 @@ run :: proc() {
         log.panic(listen_err)
     }
 
-    server := Server{io = &io, listen_sock = listen_sock}
+    mutex_allocator: mem.Mutex_Allocator
+    mem.mutex_allocator_init(&mutex_allocator, context.allocator)
+    thread_allocator := mem.mutex_allocator(&mutex_allocator)
 
-    nbio.accept(&io, listen_sock, &server, on_accept)
+    client_thread_pool: thread.Pool
+    thread.pool_init(&client_thread_pool, thread_allocator, 1024)
 
-
+    conn_index := 0
     for {
         client_sock, client_endpoint, client_err := net.accept_tcp(listen_sock)
         if client_err != nil {
             fmt.panicf("%s", client_err)
         }
+        conn_index += 1
 
         log.info("got connection from", client_endpoint)
         s := stream_from_tcp_socket(client_sock)
 
-        handle_err := handle(s)
-        if handle_err != nil {
-            log.panic(handle_err)
-        }
+        client := new(Client, thread_allocator)
+        client.sock = client_sock
+        client.endpoint = client_endpoint
+        client.stream = s
+
+        thread.pool_add_task(&client_thread_pool, thread_allocator, handle_task, client, user_index = conn_index)
     }
 
     log.info("exiting")
 }
 
-on_accept :: proc(server: ^Server, client: net.TCP_Socket, source: net.Endpoint, err: net.Network_Error) {
-    io := server.io
-    if err != nil {
-        #partial switch e in err {
-        case net.Accept_Error:
-            #partial switch e {
-            case .Insufficient_Resources:
-                log.warnf("insufficient resources to accept new connection, will retry in a second")
-                nbio.timeout(io, time.Second, server, proc(server: ^Server) {
-                    nbio.accept(server.io, server.listen_sock, server, on_accept)
-                })
-                return
-            case:   
-                log.errorf("accept error (source: %v): %v", source, e)
-                return
-            }
-        case:
-            log.panicf("non-accept error when accepting (source: %v): %v", source, err)
-        }
-    }
-
-    // queue accept next connection
-    nbio.accept(io, server.listen_sock, server, on_accept)
-
-    nbio_core.test_client_and_server_send_recv()
+Client :: struct {
+    sock: net.TCP_Socket,
+    endpoint: net.Endpoint,
+    stream: io.Stream, // wraps sock
 }
 
-handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
+handle_task :: proc(task: thread.Task) { // TODO: user arena?
+    arena: virtual.Arena
+    if err := virtual.arena_init_growing(&arena); err != nil {
+        log.panicf("can't create arena allocator for new connection: %v", err)
+    }
+    task_allocator := virtual.arena_allocator(&arena) 
+
+    client := (^Client)(task.data)
+    handle(client, context.allocator)
+}
+
+handle :: proc(client: ^Client, allocator := context.allocator) -> (err: Error) {
+    s := client.stream
+
     defer {
         if c, ok := io.to_closer(s); ok {
             io.close(c)
