@@ -9,4 +9,4 @@
 set -e # Exit on failure
 
 mkdir -p /tmp/codecrafters-build-redis-odin
-odin build src -out:/tmp/codecrafters-build-redis-odin/main
+odin build src -out:/tmp/codecrafters-build-redis-odin/main -collection:src=src
