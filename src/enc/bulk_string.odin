@@ -27,7 +27,11 @@ read_bulk_string :: proc(r: io.Reader, allocator := context.allocator) -> (str: 
 }
 
 // TODO: handle quotes
-write_bulk_string :: proc(w: io.Writer, str: string) -> (err: Error) {
+write_bulk_string :: proc(w: io.Writer, str: string, include_fb := false) -> (err: Error) {
+    if include_fb {
+        io.write_byte(w, '$') or_return
+    }
+
     write_int(w, len(str)) or_return
     _ = io.write_string(w, str) or_return
     _ = io.write_string(w, "\r\n") or_return

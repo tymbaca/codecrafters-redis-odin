@@ -106,7 +106,7 @@ handle :: proc(s: io.Stream, allocator := context.allocator) -> (err: Error) {
         switch cmd {
         case "ECHO":
             assert(len(args) == 1)
-            enc.write_bulk_string(s, args[0])
+            enc.write_bulk_string(s, args[0], include_fb = true)
         case "PING":
             _ = io.write_string(s, "+PONG\r\n") or_return
         }
