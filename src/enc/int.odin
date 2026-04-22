@@ -57,7 +57,7 @@ read_int :: proc(r: io.Reader) -> (v: int, err: Error) {
 
 write_int :: proc(w: io.Writer, v: int) -> (err: Error) {
     buf: [256]byte
-    str := strconv.itoa(buf[:], v)
+    str := strconv.write_int(buf[:], auto_cast v, 10)
 
     _ = io.write_string(w, str) or_return
     _ = io.write_string(w, "\r\n") or_return
