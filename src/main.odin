@@ -1,5 +1,6 @@
 package main
 
+import "core:os/old"
 import "base:runtime"
 import "core:bufio"
 import "core:bytes"
@@ -32,6 +33,7 @@ main :: proc() {
 }
 
 run :: proc() {
+        _ = os.change_directory("..")
 	listen_sock, listen_err := net.listen_tcp(
 		net.Endpoint{address = net.IP4_Loopback, port = 6379},
 	)
