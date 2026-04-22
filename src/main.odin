@@ -1,4 +1,3 @@
-#+vet explicit-allocators
 package main
 
 import "base:runtime"
